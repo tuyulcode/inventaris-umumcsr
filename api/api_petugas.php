@@ -15,6 +15,11 @@
  *   ?action=profil         (GET)  - Data profil petugas
  *   ?action=list_barang_all(GET)  - Daftar semua barang untuk dropdown update gambar
  *   ?action=update_gambar  (POST) - Unggah / Hapus foto barang (Update Gambar Barang)
+ *   ?action=list_unit      (GET)  - Daftar unit (filter Cek List)
+ *   ?action=list_ruang     (GET)  - Daftar ruang berdasarkan unit
+ *   ?action=list_barang_ruang (GET) - Daftar barang per unit+ruang + status cek
+ *   ?action=check_baik     (POST) - Tandai barang Baik (mode fast)
+ *   ?action=batal_check    (POST) - Batalkan pengecekan milik sendiri
  */
 
 header('Content-Type: application/json; charset=utf-8');
@@ -727,6 +732,257 @@ if ($action === 'submit_pengecekan') {
         if ($foto_name !== null) {
             @unlink("../uploads/bukti/" . $foto_name);
         }
+        jsonError('Terjadi kesalahan sistem: ' . $e->getMessage(), 500);
+    }
+}
+
+// ============================================================
+// ACTION: list_unit (untuk filter Cek List)
+// ============================================================
+if ($action === 'list_unit') {
+    $res = $conn->query("SELECT id, nama_unit FROM unit ORDER BY nama_unit ASC");
+    $units = [];
+    if ($res) {
+        while ($row = $res->fetch_assoc()) {
+            $units[] = [
+                'id' => (int)$row['id'],
+                'nama_unit' => $row['nama_unit'],
+            ];
+        }
+    }
+    jsonResponse(['success' => true, 'data' => $units]);
+}
+
+// ============================================================
+// ACTION: list_ruang (berdasarkan unit)
+// ============================================================
+if ($action === 'list_ruang') {
+    $unit_id = intval($_GET['unit_id'] ?? 0);
+    if ($unit_id <= 0) {
+        jsonResponse(['success' => true, 'data' => []]);
+    }
+
+    $stmt = $conn->prepare("SELECT id, nama_ruang FROM ruang WHERE id_unit = ? ORDER BY nama_ruang ASC");
+    $stmt->bind_param("i", $unit_id);
+    $stmt->execute();
+    $res = $stmt->get_result();
+
+    $rooms = [];
+    while ($row = $res->fetch_assoc()) {
+        $rooms[] = [
+            'id' => (int)$row['id'],
+            'nama_ruang' => $row['nama_ruang'],
+        ];
+    }
+    $stmt->close();
+
+    jsonResponse(['success' => true, 'data' => $rooms]);
+}
+
+// ============================================================
+// ACTION: list_barang_ruang (Cek Fast 2 / Cek List)
+// Daftar barang aktif pada unit+ruang beserta status pengecekan
+// di periode aktif.
+// ============================================================
+if ($action === 'list_barang_ruang') {
+    $unit_id = intval($_GET['unit_id'] ?? 0);
+    $ruang_id = intval($_GET['ruang_id'] ?? 0);
+    if ($unit_id <= 0 || $ruang_id <= 0) {
+        jsonError('Unit dan ruangan harus dipilih.');
+    }
+
+    $res_periode = $conn->query("SELECT id FROM periode_pengecekan WHERE status = 'aktif' ORDER BY id DESC LIMIT 1");
+    $id_periode = ($res_periode && $res_periode->num_rows > 0) ? (int)$res_periode->fetch_assoc()['id'] : 0;
+
+    $sql = "SELECT b.id, b.nama_barang, b.kondisi,
+                   pb.id AS id_pengecekan, pb.kondisi_temuan, pb.status_review,
+                   pb.id_petugas, ptg.nama_lengkap AS nama_petugas
+            FROM barang b
+            LEFT JOIN pengecekan_barang pb ON pb.id_barang = b.id AND pb.id_periode = ?
+            LEFT JOIN users ptg ON pb.id_petugas = ptg.id
+            WHERE b.status_aktif = 'aktif' AND b.id_unit = ? AND b.id_ruang = ?
+            ORDER BY b.nama_barang ASC";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("iii", $id_periode, $unit_id, $ruang_id);
+    $stmt->execute();
+    $res = $stmt->get_result();
+
+    $items = [];
+    $checked = 0;
+    $unchecked = 0;
+    while ($row = $res->fetch_assoc()) {
+        $is_checked = !empty($row['id_pengecekan']);
+        if ($is_checked) {
+            $checked++;
+        } else {
+            $unchecked++;
+        }
+        $items[] = [
+            'id' => (int)$row['id'],
+            'formatted_code' => str_pad($row['id'], 5, '0', STR_PAD_LEFT),
+            'nama_barang' => $row['nama_barang'],
+            'kondisi' => $row['kondisi'],
+            'is_checked' => $is_checked,
+            'kondisi_temuan' => $row['kondisi_temuan'],
+            'status_review' => $row['status_review'],
+            'id_petugas' => $row['id_petugas'] !== null ? (int)$row['id_petugas'] : null,
+            'nama_petugas' => $row['nama_petugas'],
+        ];
+    }
+    $stmt->close();
+
+    jsonResponse([
+        'success' => true,
+        'data' => $items,
+        'summary' => [
+            'total' => count($items),
+            'checked' => $checked,
+            'unchecked' => $unchecked,
+        ],
+        'has_periode' => $id_periode > 0,
+    ]);
+}
+
+// ============================================================
+// ACTION: check_baik (tombol "Baik" Cek Fast 2)
+// Tandai barang sebagai Baik (auto disetujui) di periode aktif.
+// ============================================================
+if ($action === 'check_baik') {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        jsonError('Method not allowed', 405);
+    }
+
+    $id_barang = intval($_POST['id_barang'] ?? 0);
+    if ($id_barang <= 0) {
+        jsonError('ID barang tidak valid.');
+    }
+
+    $res_periode = $conn->query("SELECT id FROM periode_pengecekan WHERE status = 'aktif' ORDER BY id DESC LIMIT 1");
+    if (!$res_periode || $res_periode->num_rows === 0) {
+        jsonError('Tidak ada periode pengecekan aktif saat ini!');
+    }
+    $id_periode = (int)$res_periode->fetch_assoc()['id'];
+
+    $res_barang = $conn->query("SELECT status_aktif, nama_barang FROM barang WHERE id = $id_barang");
+    $barang_data = $res_barang ? $res_barang->fetch_assoc() : null;
+    if (!$barang_data || $barang_data['status_aktif'] !== 'aktif') {
+        jsonError('Barang tidak ditemukan atau sudah tidak aktif!');
+    }
+
+    $kondisi_temuan = 'Baik';
+    $catatan = '';
+    $foto_name = null;
+    $status_review = 'disetujui';
+
+    $conn->begin_transaction();
+    try {
+        $stmt = $conn->prepare("SELECT id, foto_bukti FROM pengecekan_barang WHERE id_periode = ? AND id_barang = ?");
+        $stmt->bind_param("ii", $id_periode, $id_barang);
+        $stmt->execute();
+        $exist_res = $stmt->get_result();
+        $stmt->close();
+
+        if ($exist_res && $exist_res->num_rows > 0) {
+            $old_data = $exist_res->fetch_assoc();
+            $id_pengecekan = $old_data['id'];
+
+            if (!empty($old_data['foto_bukti'])) {
+                @unlink("../uploads/bukti/" . $old_data['foto_bukti']);
+            }
+
+            $stmt_up = $conn->prepare("UPDATE pengecekan_barang SET id_petugas = ?, kondisi_temuan = ?, catatan = ?, foto_bukti = ?, status_review = ?, tgl_pengecekan = NOW() WHERE id = ?");
+            $stmt_up->bind_param("issssi", $userId, $kondisi_temuan, $catatan, $foto_name, $status_review, $id_pengecekan);
+            $stmt_up->execute();
+            $stmt_up->close();
+        } else {
+            $stmt_in = $conn->prepare("INSERT INTO pengecekan_barang (id_periode, id_barang, id_petugas, kondisi_temuan, catatan, foto_bukti, status_review) VALUES (?, ?, ?, ?, ?, ?, ?)");
+            $stmt_in->bind_param("iiissss", $id_periode, $id_barang, $userId, $kondisi_temuan, $catatan, $foto_name, $status_review);
+            $stmt_in->execute();
+            $stmt_in->close();
+        }
+
+        $stmt_brg = $conn->prepare("UPDATE barang SET kondisi = 'Baik' WHERE id = ?");
+        $stmt_brg->bind_param("i", $id_barang);
+        $stmt_brg->execute();
+        $stmt_brg->close();
+
+        $conn->commit();
+
+        jsonResponse([
+            'success' => true,
+            'message' => 'Barang "' . htmlspecialchars($barang_data['nama_barang']) . '" berhasil disimpan dengan kondisi Baik.',
+            'petugas' => $currentUser['nama_lengkap'],
+        ]);
+    } catch (Exception $e) {
+        $conn->rollback();
+        jsonError('Terjadi kesalahan sistem: ' . $e->getMessage(), 500);
+    }
+}
+
+// ============================================================
+// ACTION: batal_check (batalkan pengecekan milik sendiri)
+// ============================================================
+if ($action === 'batal_check') {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        jsonError('Method not allowed', 405);
+    }
+
+    $id_barang = intval($_POST['id_barang'] ?? 0);
+    if ($id_barang <= 0) {
+        jsonError('ID barang tidak valid.');
+    }
+
+    $res_periode = $conn->query("SELECT id FROM periode_pengecekan WHERE status = 'aktif' ORDER BY id DESC LIMIT 1");
+    if (!$res_periode || $res_periode->num_rows === 0) {
+        jsonError('Tidak ada periode pengecekan aktif saat ini!');
+    }
+    $id_periode = (int)$res_periode->fetch_assoc()['id'];
+
+    $res_barang = $conn->query("SELECT nama_barang FROM barang WHERE id = $id_barang");
+    $barang_data = $res_barang ? $res_barang->fetch_assoc() : null;
+    if (!$barang_data) {
+        jsonError('Barang tidak ditemukan!');
+    }
+
+    $conn->begin_transaction();
+    try {
+        $stmt = $conn->prepare("SELECT id_petugas, foto_bukti FROM pengecekan_barang WHERE id_periode = ? AND id_barang = ?");
+        $stmt->bind_param("ii", $id_periode, $id_barang);
+        $stmt->execute();
+        $check_res = $stmt->get_result();
+
+        if ($check_res && $check_res->num_rows > 0) {
+            $check_data = $check_res->fetch_assoc();
+
+            if (intval($check_data['id_petugas']) !== $userId) {
+                $stmt->close();
+                $conn->rollback();
+                jsonError('Anda tidak memiliki akses untuk membatalkan pengecekan ini!', 403);
+            }
+            $stmt->close();
+
+            if (!empty($check_data['foto_bukti'])) {
+                @unlink("../uploads/bukti/" . $check_data['foto_bukti']);
+            }
+
+            $stmt_del = $conn->prepare("DELETE FROM pengecekan_barang WHERE id_periode = ? AND id_barang = ?");
+            $stmt_del->bind_param("ii", $id_periode, $id_barang);
+            $stmt_del->execute();
+            $stmt_del->close();
+        } else {
+            $stmt->close();
+            $conn->rollback();
+            jsonError('Pengecekan barang tidak ditemukan atau sudah dibatalkan.');
+        }
+
+        $conn->commit();
+
+        jsonResponse([
+            'success' => true,
+            'message' => 'Pengecekan barang "' . htmlspecialchars($barang_data['nama_barang']) . '" berhasil dibatalkan.',
+        ]);
+    } catch (Exception $e) {
+        $conn->rollback();
         jsonError('Terjadi kesalahan sistem: ' . $e->getMessage(), 500);
     }
 }
