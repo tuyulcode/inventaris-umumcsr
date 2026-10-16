@@ -602,7 +602,7 @@ class _ScanScreenState extends State<ScanScreen> {
       extendBodyBehindAppBar: false,
       appBar: AppBar(
         title: Text(
-          'Scan & Cek Barang',
+          'Scan',
           style: GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 20),
         ),
         centerTitle: true,
