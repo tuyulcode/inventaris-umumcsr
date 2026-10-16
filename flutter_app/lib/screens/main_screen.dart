@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dashboard_screen.dart';
-import 'scan_screen.dart';
+import 'cek_barang_screen.dart';
 import 'riwayat_screen.dart';
 import 'update_gambar_screen.dart';
 import 'profil_screen.dart';
@@ -37,7 +37,7 @@ class _MainScreenState extends State<MainScreen> {
         );
         break;
       case 1:
-        screen = const ScanScreen();
+        screen = const CekBarangScreen();
         break;
       case 2:
         screen = const RiwayatScreen();
@@ -86,7 +86,7 @@ class _MainScreenState extends State<MainScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 _buildNavItem(0, Icons.dashboard_rounded, 'Dashboard'),
-                _buildNavItem(1, Icons.qr_code_scanner_rounded, 'Scan'),
+                _buildNavItem(1, Icons.inventory_2_rounded, 'Cek Barang'),
                 _buildNavItem(2, Icons.history_rounded, 'Riwayat'),
                 _buildNavItem(3, Icons.image_rounded, 'Gambar'),
                 _buildNavItem(4, Icons.person_rounded, 'Profil'),
