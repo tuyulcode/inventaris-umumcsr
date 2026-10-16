@@ -5,6 +5,9 @@ import '../config/api_config.dart';
 import '../models/user.dart';
 import '../models/barang.dart';
 import '../models/pengecekan.dart';
+import '../models/unit.dart';
+import '../models/ruang.dart';
+import '../models/barang_cek.dart';
 import 'auth_service.dart';
 
 class ApiService {
@@ -191,6 +194,106 @@ class ApiService {
       final data = json.decode(response.body);
       
       return data;
+    } on SocketException {
+      return {'success': false, 'message': 'Tidak dapat terhubung ke server.'};
+    } catch (e) {
+      return {'success': false, 'message': 'Terjadi kesalahan: $e'};
+    }
+  }
+
+  // ============================================================
+  // CEK LIST (Cek Fast 2)
+  // ============================================================
+  static Future<Map<String, dynamic>> getUnits() async {
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiConfig.apiUrl}?action=list_unit'),
+        headers: _authHeaders,
+      ).timeout(const Duration(seconds: 15));
+
+      final data = json.decode(response.body);
+      if (data['success'] == true) {
+        final units = (data['data'] as List).map((e) => Unit.fromJson(e)).toList();
+        return {'success': true, 'data': units};
+      }
+      return {'success': false, 'message': data['message'] ?? 'Gagal memuat unit'};
+    } on SocketException {
+      return {'success': false, 'message': 'Tidak dapat terhubung ke server.'};
+    } catch (e) {
+      return {'success': false, 'message': 'Terjadi kesalahan: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> getRuang(int unitId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiConfig.apiUrl}?action=list_ruang&unit_id=$unitId'),
+        headers: _authHeaders,
+      ).timeout(const Duration(seconds: 15));
+
+      final data = json.decode(response.body);
+      if (data['success'] == true) {
+        final rooms = (data['data'] as List).map((e) => Ruang.fromJson(e)).toList();
+        return {'success': true, 'data': rooms};
+      }
+      return {'success': false, 'message': data['message'] ?? 'Gagal memuat ruangan'};
+    } on SocketException {
+      return {'success': false, 'message': 'Tidak dapat terhubung ke server.'};
+    } catch (e) {
+      return {'success': false, 'message': 'Terjadi kesalahan: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> getBarangRuang(int unitId, int ruangId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiConfig.apiUrl}?action=list_barang_ruang&unit_id=$unitId&ruang_id=$ruangId'),
+        headers: _authHeaders,
+      ).timeout(const Duration(seconds: 15));
+
+      final data = json.decode(response.body);
+      if (data['success'] == true) {
+        final items = (data['data'] as List).map((e) => BarangCek.fromJson(e)).toList();
+        return {
+          'success': true,
+          'data': items,
+          'summary': data['summary'],
+          'has_periode': data['has_periode'],
+        };
+      }
+      return {'success': false, 'message': data['message'] ?? 'Gagal memuat daftar barang'};
+    } on SocketException {
+      return {'success': false, 'message': 'Tidak dapat terhubung ke server.'};
+    } catch (e) {
+      return {'success': false, 'message': 'Terjadi kesalahan: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> checkBaik(int idBarang) async {
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.apiUrl}?action=check_baik'),
+        headers: _authHeaders,
+        body: {'id_barang': idBarang.toString()},
+      ).timeout(const Duration(seconds: 15));
+
+      return json.decode(response.body);
+    } on SocketException {
+      return {'success': false, 'message': 'Tidak dapat terhubung ke server.'};
+    } catch (e) {
+      return {'success': false, 'message': 'Terjadi kesalahan: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> batalCheck(int idBarang) async {
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.apiUrl}?action=batal_check'),
+        headers: _authHeaders,
+        body: {'id_barang': idBarang.toString()},
+      ).timeout(const Duration(seconds: 15));
+
+      return json.decode(response.body);
     } on SocketException {
       return {'success': false, 'message': 'Tidak dapat terhubung ke server.'};
     } catch (e) {
