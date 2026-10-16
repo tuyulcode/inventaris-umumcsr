@@ -51,7 +51,8 @@ class _SplashScreenState extends State<SplashScreen> {
             child: Image.asset(
               'assets/icon/back2.png',
               fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => const ColoredBox(color: _nearBlack),
+              errorBuilder: (context, error, stackTrace) =>
+                  const ColoredBox(color: _nearBlack),
             ),
           ),
           // Dark gradient overlay biar teks/tombol putih tetap kebaca
@@ -97,15 +98,25 @@ class _SplashScreenState extends State<SplashScreen> {
                           child: Image.asset(
                             'assets/icon/icon2.png',
                             fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) => RichText(
-                              text: TextSpan(
-                                style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w800),
-                                children: const [
-                                  TextSpan(text: 'i', style: TextStyle(color: _nearBlack)),
-                                  TextSpan(text: 'k', style: TextStyle(color: _midPurple)),
-                                ],
-                              ),
-                            ),
+                            errorBuilder: (context, error, stackTrace) =>
+                                RichText(
+                                  text: TextSpan(
+                                    style: GoogleFonts.inter(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                    children: const [
+                                      TextSpan(
+                                        text: 'i',
+                                        style: TextStyle(color: _nearBlack),
+                                      ),
+                                      TextSpan(
+                                        text: 'k',
+                                        style: TextStyle(color: _midPurple),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                           ),
                         ),
                       ),
@@ -142,28 +153,35 @@ class _SplashScreenState extends State<SplashScreen> {
                   // kubus dan lebih deket ke slider di bawahnya.
                   const Expanded(flex: 6, child: SizedBox()),
 
-                  _StatPill(label: '128 Item terpantau'),
+                  _StatPill(label: 'Sistem Inventarisasi'),
 
                   const Expanded(flex: 1, child: SizedBox()),
 
                   // Bottom bar — slider "Geser untuk Mulai" gantiin tombol
                   // biasa. Splash tetap auto-lanjut sendiri lewat timer di atas.
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 10,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.white.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(40),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.14),
+                      ),
                     ),
                     child: Row(
                       children: [
-                        const _CircleIconButton(icon: Icons.qr_code_scanner_rounded),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: _SlideToStart(onCompleted: _goToLogin),
+                        const _CircleIconButton(
+                          icon: Icons.qr_code_scanner_rounded,
                         ),
                         const SizedBox(width: 10),
-                        const _CircleIconButton(icon: Icons.keyboard_arrow_down_rounded),
+                        Expanded(child: _SlideToStart(onCompleted: _goToLogin)),
+                        const SizedBox(width: 10),
+                        const _CircleIconButton(
+                          icon: Icons.keyboard_arrow_down_rounded,
+                        ),
                       ],
                     ),
                   ),
@@ -363,7 +381,11 @@ class _SlideToStartState extends State<_SlideToStart>
                       shape: BoxShape.circle,
                     ),
                     child: _completed
-                        ? const Icon(Icons.check_rounded, color: _deepPurple, size: 22)
+                        ? const Icon(
+                            Icons.check_rounded,
+                            color: _deepPurple,
+                            size: 22,
+                          )
                         : AnimatedBuilder(
                             animation: _hintOffset,
                             builder: (context, child) {
