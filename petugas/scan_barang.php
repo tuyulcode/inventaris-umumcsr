@@ -5,6 +5,14 @@ include '../config/database.php';
 $page_title = 'Scan & Cek Barang';
 $active_menu = 'scan_barang';
 
+// Pastikan file/direktori hasil upload dapat dibaca oleh web server
+// (beberapa hosting menerapkan umask 077 sehingga file terbuat 0600)
+function fix_perm($path, $mode = 0644) {
+    if (file_exists($path)) {
+        @chmod($path, $mode);
+    }
+}
+
 // Ambil Periode Pengecekan Aktif
 $res_periode_aktif = $conn->query("SELECT * FROM periode_pengecekan WHERE status = 'aktif' ORDER BY id DESC LIMIT 1");
 $periode_aktif = null;
@@ -38,10 +46,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_sensus'])) {
     $foto_name = null;
     $upload_ok = true;
 
-    // Foto wajib jika Rusak atau Hilang
-    if (in_array($kondisi_temuan, ['Rusak', 'Hilang'])) {
-        if (!isset($_FILES['foto_bukti']) || $_FILES['foto_bukti']['error'] !== 0) {
-            $_SESSION['error'] = 'Foto bukti wajib dilampirkan jika barang rusak atau hilang!';
+    // Foto wajib hanya jika Rusak
+    if ($kondisi_temuan === 'Rusak') {
+        $file_err = $_FILES['foto_bukti']['error'] ?? UPLOAD_ERR_NO_FILE;
+        if ($file_err === UPLOAD_ERR_NO_FILE) {
+            $_SESSION['error'] = 'Foto bukti wajib dilampirkan jika barang rusak!';
+            $upload_ok = false;
+        } elseif ($file_err !== UPLOAD_ERR_OK) {
+            $_SESSION['error'] = 'Gagal mengunggah foto bukti (kode ' . $file_err . '). Ukuran foto mungkin terlalu besar. Silakan coba lagi.';
             $upload_ok = false;
         } else {
             $tmp = $_FILES['foto_bukti']['tmp_name'];
@@ -54,6 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_sensus'])) {
                 if (!file_exists($target_dir)) {
                     mkdir($target_dir, 0777, true);
                 }
+                @chmod($target_dir, 0755);
 
                 // Check GD availability
                 $gd_available = (function_exists('imagecreatefromjpeg') || function_exists('imagecreatefrompng') || function_exists('imagecreatefromgif') || function_exists('imagecreatefromwebp'));
@@ -71,6 +84,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_sensus'])) {
                         if (!move_uploaded_file($tmp, $target_file)) {
                             $_SESSION['error'] = 'Gagal mengunggah foto bukti!';
                             $upload_ok = false;
+                        } else {
+                            fix_perm($target_file, 0644);
                         }
                     }
                 } else {
@@ -156,7 +171,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_sensus'])) {
                                 $upload_ok = false;
                             } else {
                                 @unlink($tempOut);
+                                fix_perm($target_file, 0644);
                             }
+                        } else {
+                            fix_perm($target_file, 0644);
                         }
                         imagedestroy($srcForDownscale);
                     }
@@ -427,6 +445,7 @@ include '../includes/sidebar_petugas.php';
                             <!-- Form input sensus -->
                             <form method="POST" action="scan_barang.php" enctype="multipart/form-data" id="sensus-form">
                                 <input type="hidden" name="id_barang" id="form-id-barang">
+                                <input type="hidden" name="submit_sensus" value="1">
                                 
                                 <div class="form-group">
                                     <label class="font-weight-bold" style="font-size:13px;">Kondisi Fisik Saat Ini <span class="text-danger">*</span></label>
@@ -452,15 +471,24 @@ include '../includes/sidebar_petugas.php';
                                     </div>
                                 </div>
 
-                                <!-- Photo Upload (Wajib jika rusak/hilang) -->
+                                <!-- Photo Upload (Wajib hanya jika rusak) -->
                                 <div class="form-group" id="photo-upload-group" style="display: none;">
-                                    <label class="font-weight-bold text-danger" style="font-size:13px;">Lampirkan Foto Bukti <span class="text-danger">*</span></label>
+                                    <label class="font-weight-bold text-danger" style="font-size:13px;">Lampirkan Foto Bukti Kerusakan <span class="text-danger">*</span></label>
                                     <div class="mb-2" id="preview_bukti_foto"></div>
-                                    <div class="custom-file">
-                                        <input type="file" class="custom-file-input" name="foto_bukti" id="foto_bukti" accept="image/*" onchange="previewUpload(this, 'preview_bukti_foto')">
-                                        <label class="custom-file-label" for="foto_bukti">Ambil Foto / Pilih File...</label>
+                                    <input type="file" class="d-none" name="foto_bukti" id="foto_bukti" accept="image/*" onchange="previewUpload(this, 'preview_bukti_foto')">
+                                    <div class="row">
+                                        <div class="col-6 mb-2">
+                                            <button type="button" class="btn btn-outline-primary btn-block py-2" style="border-radius:10px;" onclick="openPhotoPicker(true)">
+                                                <i class="fas fa-camera mr-1"></i> Ambil Foto
+                                            </button>
+                                        </div>
+                                        <div class="col-6 mb-2">
+                                            <button type="button" class="btn btn-outline-secondary btn-block py-2" style="border-radius:10px;" onclick="openPhotoPicker(false)">
+                                                <i class="fas fa-image mr-1"></i> Pilih Gambar
+                                            </button>
+                                        </div>
                                     </div>
-                                    <small class="form-text text-muted text-danger font-weight-bold"><i class="fas fa-info-circle mr-1"></i> Melampirkan foto bukti kondisi fisik wajib untuk temuan barang rusak atau hilang.</small>
+                                    <small class="form-text text-muted text-danger font-weight-bold"><i class="fas fa-info-circle mr-1"></i> Foto bukti kondisi fisik wajib dilampirkan untuk temuan barang rusak.</small>
                                 </div>
 
                                 <div class="form-group">
@@ -469,7 +497,7 @@ include '../includes/sidebar_petugas.php';
                                 </div>
 
                                 <div class="mt-4">
-                                    <button type="submit" name="submit_sensus" class="btn btn-flat-primary btn-block py-2" style="border-radius:10px; font-weight:700; font-size:14px;">
+                                    <button type="submit" class="btn btn-flat-primary btn-block py-2" style="border-radius:10px; font-weight:700; font-size:14px;">
                                         <i class="fas fa-paper-plane mr-2"></i> Kirim Laporan
                                     </button>
                                 </div>
@@ -546,28 +574,150 @@ $(function() {
         <?php unset($_SESSION['play_beep']); ?>
     <?php endif; ?>
 
-    // Show filename on custom file input
-    $(document).on('change', '.custom-file-input', function() {
-        let fileName = $(this).val().split('\\').pop();
-        $(this).next('.custom-file-label').addClass("selected").html(fileName);
-    });
-
     // Auto focus ke input manual saat load
     $('#input-code').focus();
 
-    // Tampilkan indikator loading premium SweetAlert2 saat submit form sensus (sangat berguna ketika kompresi gambar sedang berjalan)
-    $('#sensus-form').on('submit', function() {
+    // Kompres foto di sisi klien dulu agar tidak melebihi batas upload hosting
+    $('#sensus-form').on('submit', function(e) {
+        const checkedKondisi = document.querySelector('input[name="kondisi_temuan"]:checked');
+        const fileInput = document.getElementById('foto_bukti');
+        const hasFile = fileInput.files && fileInput.files.length > 0;
+
+        if (checkedKondisi && checkedKondisi.value === 'Rusak' && !hasFile) {
+            e.preventDefault();
+            Swal.fire({
+                title: 'Foto Bukti Wajib',
+                text: 'Silakan ambil foto atau pilih gambar bukti kerusakan terlebih dahulu.',
+                icon: 'warning',
+                confirmButtonColor: '#4c1d95'
+            });
+            return false;
+        }
+
+        // Tanpa foto -> langsung submit
+        if (!hasFile) {
+            showProcessing();
+            return true;
+        }
+
+        // Foto sudah dikompres sebelumnya -> lanjut submit
+        if (fileInput.dataset.compressed === '1') {
+            showProcessing();
+            return true;
+        }
+
+        // Ada foto -> kompres dulu sebelum upload
+        e.preventDefault();
         Swal.fire({
-            title: 'Memproses...',
-            text: 'Sedang menyimpan laporan pengecekan dan mengompresi gambar bukti. Silakan tunggu.',
+            title: 'Mengompresi Foto...',
+            text: 'Sedang mengecilkan ukuran foto bukti sebelum diunggah.',
             allowOutsideClick: false,
             didOpen: () => {
                 Swal.showLoading();
             }
         });
-        return true;
+
+        compressImage(fileInput.files[0]).then(function(compressedFile) {
+            try {
+                const dt = new DataTransfer();
+                dt.items.add(compressedFile);
+                fileInput.files = dt.files;
+            } catch (err) {
+                console.warn('DataTransfer tidak didukung, memakai file asli.', err);
+            }
+            fileInput.dataset.compressed = '1';
+            document.getElementById('sensus-form').submit();
+        }).catch(function(err) {
+            console.warn('Kompresi gagal, memakai file asli.', err);
+            fileInput.dataset.compressed = '1';
+            document.getElementById('sensus-form').submit();
+        });
+
+        return false;
     });
 });
+
+function showProcessing() {
+    Swal.fire({
+        title: 'Memproses...',
+        text: 'Sedang menyimpan laporan pengecekan. Silakan tunggu.',
+        allowOutsideClick: false,
+        didOpen: () => {
+            Swal.showLoading();
+        }
+    });
+}
+
+function fileToDataURL(file) {
+    return new Promise(function(resolve, reject) {
+        const reader = new FileReader();
+        reader.onload = function(ev) { resolve(ev.target.result); };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
+function loadImage(src) {
+    return new Promise(function(resolve, reject) {
+        const img = new Image();
+        img.onload = function() { resolve(img); };
+        img.onerror = reject;
+        img.src = src;
+    });
+}
+
+function drawToBlob(img, maxDim, quality) {
+    return new Promise(function(resolve) {
+        let w = img.naturalWidth || img.width;
+        let h = img.naturalHeight || img.height;
+        const scale = Math.min(1, maxDim / Math.max(w, h));
+        w = Math.max(1, Math.round(w * scale));
+        h = Math.max(1, Math.round(h * scale));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+
+        canvas.toBlob(function(blob) { resolve(blob); }, 'image/jpeg', quality);
+    });
+}
+
+async function compressImage(file) {
+    // Coba beberapa konfigurasi, ambil hasil terkecil yang <= 1 MB
+    const configs = [
+        { maxDim: 1600, quality: 0.8 },
+        { maxDim: 1280, quality: 0.6 },
+        { maxDim: 1024, quality: 0.5 }
+    ];
+    const maxBytes = 1024 * 1024;
+
+    const dataUrl = await fileToDataURL(file);
+    const img = await loadImage(dataUrl);
+
+    let best = null;
+    for (let i = 0; i < configs.length; i++) {
+        const blob = await drawToBlob(img, configs[i].maxDim, configs[i].quality);
+        if (!blob) continue;
+        if (best === null || blob.size < best.size) {
+            best = blob;
+        }
+        if (blob.size <= maxBytes) {
+            best = blob;
+            break;
+        }
+    }
+
+    if (!best) {
+        throw new Error('Gagal mengompresi gambar');
+    }
+
+    const baseName = (file.name || 'foto').replace(/\.[^.]+$/, '');
+    return new File([best], baseName + '.jpg', { type: 'image/jpeg' });
+}
 
 function toggleCamera() {
     if (cameraRunning) {
@@ -765,21 +915,31 @@ function handleKondisiChange(kondisi) {
         }
     });
 
-    if (kondisi === 'Rusak' || kondisi === 'Hilang') {
+    if (kondisi === 'Rusak') {
         photoGroup.style.display = 'block';
-        fileInput.setAttribute('required', 'required');
     } else {
         photoGroup.style.display = 'none';
-        fileInput.removeAttribute('required');
         
         // Reset file upload
         fileInput.value = '';
-        $(fileInput).next('.custom-file-label').removeClass("selected").html("Ambil Foto / Pilih File...");
+        fileInput.removeAttribute('capture');
+        fileInput.dataset.compressed = '';
         document.getElementById('preview_bukti_foto').innerHTML = '';
     }
 }
 
+function openPhotoPicker(useCamera) {
+    const fileInput = document.getElementById('foto_bukti');
+    if (useCamera) {
+        fileInput.setAttribute('capture', 'environment');
+    } else {
+        fileInput.removeAttribute('capture');
+    }
+    fileInput.click();
+}
+
 function previewUpload(input, previewId) {
+    input.dataset.compressed = '';
     const preview = document.getElementById(previewId);
     if (input.files && input.files[0]) {
         const reader = new FileReader();

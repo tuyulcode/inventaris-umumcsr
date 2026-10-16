@@ -5,6 +5,14 @@ include '../config/database.php';
 $page_title = 'Data Barang';
 $active_menu = 'barang';
 
+// Pastikan file hasil upload dapat dibaca oleh web server
+// (sebagian hosting memakai umask 077 sehingga file terbuat 0600)
+function fix_perm($path, $mode = 0644) {
+    if (file_exists($path)) {
+        @chmod($path, $mode);
+    }
+}
+
 // ===== HANDLE ACTIONS =====
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
@@ -57,6 +65,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $target_file = $target_dir . $foto_name;
             
             if (move_uploaded_file($_FILES["foto"]["tmp_name"], $target_file)) {
+                fix_perm($target_file, 0644);
                 // Delete old file if exists and updating
                 if (!empty($_POST['old_foto']) && file_exists($target_dir . $_POST['old_foto'])) {
                     unlink($target_dir . $_POST['old_foto']);

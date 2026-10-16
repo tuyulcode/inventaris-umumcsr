@@ -39,9 +39,9 @@
                 <!-- Master Data -->
                 <li class="nav-header">MASTER DATA</li>
                 <li
-                    class="nav-item <?= in_array(($active_menu ?? ''), ['unit', 'ruang', 'jenis', 'kategori', 'merk', 'barang', 'barang_qr']) ? 'menu-open' : '' ?>">
+                    class="nav-item <?= in_array(($active_menu ?? ''), ['unit', 'ruang', 'jenis', 'kategori', 'merk', 'barang', 'barang_qr', 'print_inventarisasi']) ? 'menu-open' : '' ?>">
                     <a href="#"
-                        class="nav-link <?= in_array(($active_menu ?? ''), ['unit', 'ruang', 'jenis', 'kategori', 'merk', 'barang', 'barang_qr']) ? 'active' : '' ?>">
+                        class="nav-link <?= in_array(($active_menu ?? ''), ['unit', 'ruang', 'jenis', 'kategori', 'merk', 'barang', 'barang_qr', 'print_inventarisasi']) ? 'active' : '' ?>">
                         <i class="nav-icon fas fa-database"></i>
                         <p>
                             Master Data
@@ -94,6 +94,13 @@
                                 class="nav-link <?= ($active_menu ?? '') === 'barang_qr' ? 'active' : '' ?>">
                                 <i class="nav-icon fas fa-qrcode"></i>
                                 <p>Cetak QR Code</p>
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a href="print_inventarisasi.php"
+                                class="nav-link <?= ($active_menu ?? '') === 'print_inventarisasi' ? 'active' : '' ?>">
+                                <i class="nav-icon fas fa-file-pdf"></i>
+                                <p>Print Data Inventarisasi</p>
                             </a>
                         </li>
                     </ul>

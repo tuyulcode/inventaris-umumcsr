@@ -5,6 +5,14 @@ include '../config/database.php';
 $page_title = 'Penghapusan Barang';
 $active_menu = 'penghapusan_barang';
 
+// Pastikan file hasil upload dapat dibaca oleh web server
+// (sebagian hosting memakai umask 077 sehingga file terbuat 0600)
+function fix_perm($path, $mode = 0644) {
+    if (file_exists($path)) {
+        @chmod($path, $mode);
+    }
+}
+
 // Parameters for pre-selection (e.g. from review page)
 $pre_selected_barang_id = isset($_GET['barang_id']) ? intval($_GET['barang_id']) : 0;
 $pre_selected_alasan    = isset($_GET['alasan']) ? $_GET['alasan'] : '';
@@ -29,10 +37,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!file_exists($target_dir)) {
                 mkdir($target_dir, 0777, true);
             }
+            @chmod($target_dir, 0755);
             $file_ext = pathinfo($_FILES["dokumen_pendukung"]["name"], PATHINFO_EXTENSION);
             $doc_name = "DOC_BATAL_" . time() . "_" . rand(100, 999) . "." . $file_ext;
             $target_file = $target_dir . $doc_name;
             move_uploaded_file($_FILES["dokumen_pendukung"]["tmp_name"], $target_file);
+            fix_perm($target_file, 0644);
         }
 
         if ($id_barang > 0 && !empty($alasan)) {

@@ -5,6 +5,14 @@ include '../config/database.php';
 $page_title = 'Update Gambar Barang';
 $active_menu = 'update_gambar';
 
+// Pastikan file/direktori hasil upload dapat dibaca oleh web server
+// (beberapa hosting memakai umask 077 sehingga file terbuat 0600)
+function fix_perm($path, $mode = 0644) {
+  if (file_exists($path)) {
+    @chmod($path, $mode);
+  }
+}
+
 // Handle delete image
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete') {
   $id_barang = intval($_POST['id_barang'] ?? 0);
@@ -65,6 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
       $newName = 'IMG_' . $id_barang . '_' . time() . '.' . $ext;
       $targetPath = $uploadsDir . $newName;
       if (move_uploaded_file($tmp, $targetPath)) {
+        fix_perm($targetPath, 0644);
         // Update DB and remove old foto jika ada
         $old = $conn->query("SELECT foto FROM barang WHERE id = $id_barang")->fetch_assoc();
         $oldName = $old['foto'] ?? '';
@@ -167,6 +176,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     // Move to uploads
     $uploadsDir = '../uploads/barang/';
     if (!file_exists($uploadsDir)) mkdir($uploadsDir, 0777, true);
+    @chmod($uploadsDir, 0755);
     $newName = 'IMG_' . $id_barang . '_' . time() . '.jpg';
     $targetPath = $uploadsDir . $newName;
     if (!rename($tempOut, $targetPath)) {
@@ -178,7 +188,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             header('Location: update_gambar.php'); exit;
         } else {
             @unlink($tempOut);
+            fix_perm($targetPath, 0644);
         }
+    } else {
+        fix_perm($targetPath, 0644);
     }
 
     imagedestroy($srcForDownscale);

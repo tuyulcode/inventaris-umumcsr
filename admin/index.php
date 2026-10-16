@@ -65,7 +65,7 @@ $data_kat_values = [];
 $res_chart_kat = $conn->query("
     SELECT COALESCE(k.nama_kategori, 'Tanpa Kategori') as nama, SUM(b.jumlah) as total 
     FROM barang b LEFT JOIN kategori k ON b.id_kategori = k.id 
-    WHERE b.status_aktif = 'aktif' GROUP BY b.id_kategori ORDER BY total DESC LIMIT 10
+    WHERE b.status_aktif = 'aktif' GROUP BY b.id_kategori, k.nama_kategori ORDER BY total DESC LIMIT 10
 ");
 if ($res_chart_kat) {
     while ($r = $res_chart_kat->fetch_assoc()) {
@@ -80,7 +80,7 @@ $data_ruang_values = [];
 $res_chart_ruang = $conn->query("
     SELECT CONCAT(COALESCE(r.nama_ruang, '-'), ' (', COALESCE(u.nama_unit, '-'), ')') as label, SUM(b.jumlah) as total 
     FROM barang b LEFT JOIN ruang r ON b.id_ruang = r.id LEFT JOIN unit u ON b.id_unit = u.id 
-    WHERE b.status_aktif = 'aktif' GROUP BY b.id_ruang ORDER BY total DESC LIMIT 10
+    WHERE b.status_aktif = 'aktif' GROUP BY b.id_ruang, r.nama_ruang, u.nama_unit ORDER BY total DESC LIMIT 10
 ");
 if ($res_chart_ruang) {
     while ($r = $res_chart_ruang->fetch_assoc()) {
