@@ -20,6 +20,8 @@
  *   ?action=list_barang_ruang (GET) - Daftar barang per unit+ruang + status cek
  *   ?action=check_baik     (POST) - Tandai barang Baik (mode fast)
  *   ?action=batal_check    (POST) - Batalkan pengecekan milik sendiri
+ *   ?action=list_master    (GET)  - Daftar unit/jenis/kategori/merk (form register)
+ *   ?action=register_barang(POST) - Daftarkan label QR yang belum terpakai
  */
 
 header('Content-Type: application/json; charset=utf-8');
@@ -90,6 +92,156 @@ function jsonResponse($data, $code = 200) {
 
 function jsonError($message, $code = 400) {
     jsonResponse(['success' => false, 'message' => $message], $code);
+}
+
+// ============================================================
+// Helper: format data barang (dipakai get_barang & register_barang)
+// ============================================================
+function barang_payload($row) {
+    return [
+        'id' => (int)$row['id'],
+        'nama_barang' => $row['nama_barang'],
+        'formatted_code' => str_pad($row['id'], 5, "0", STR_PAD_LEFT),
+        'nama_merk' => $row['nama_merk'] ?? '-',
+        'nama_jenis' => $row['nama_jenis'] ?? '-',
+        'nama_kategori' => $row['nama_kategori'] ?? '-',
+        'nama_unit' => $row['nama_unit'] ?? '-',
+        'nama_ruang' => $row['nama_ruang'] ?? '-',
+        'kondisi' => $row['kondisi'],
+        'status_aktif' => $row['status_aktif'],
+        'foto' => !empty($row['foto']) ? $row['foto'] : null,
+        'jumlah' => (int)$row['jumlah'],
+        'tgl_pembelian' => $row['tgl_pembelian'],
+    ];
+}
+
+function fetch_barang_payload($conn, $id_barang) {
+    $stmt = $conn->prepare("
+        SELECT b.*, m.nama_merk, j.nama_jenis, k.nama_kategori, u.nama_unit, r.nama_ruang
+        FROM barang b
+        LEFT JOIN merk m ON b.id_merk = m.id
+        LEFT JOIN jenis j ON b.id_jenis = j.id
+        LEFT JOIN kategori k ON b.id_kategori = k.id
+        LEFT JOIN unit u ON b.id_unit = u.id
+        LEFT JOIN ruang r ON b.id_ruang = r.id
+        WHERE b.id = ?
+    ");
+    $stmt->bind_param("i", $id_barang);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $row = ($res && $res->num_rows > 0) ? $res->fetch_assoc() : null;
+    $stmt->close();
+
+    return $row ? barang_payload($row) : null;
+}
+
+// Simpan foto barang ke uploads/barang (dipakai API/Flutter) dan salin ke
+// dist/img/barang agar tetap tampil di halaman admin web.
+function save_barang_photo($file, $id_barang) {
+    if (!isset($file) || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        jsonError('Gagal mengunggah foto barang.');
+    }
+
+    $tmp = $file['tmp_name'];
+    $info = @getimagesize($tmp);
+    if (!$info || empty($info['mime'])) {
+        jsonError('File foto bukan gambar yang valid.');
+    }
+
+    $uploadsDir = '../uploads/barang/';
+    $distDir = '../dist/img/barang/';
+    if (!file_exists($uploadsDir)) mkdir($uploadsDir, 0777, true);
+    if (!file_exists($distDir)) mkdir($distDir, 0777, true);
+    @chmod($uploadsDir, 0755);
+    @chmod($distDir, 0755);
+
+    $gd_available = function_exists('imagecreatefromjpeg') && function_exists('imagejpeg');
+    $newName = 'BRG_' . $id_barang . '_' . time() . '.jpg';
+    $targetPath = $uploadsDir . $newName;
+
+    if (!$gd_available) {
+        $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+        $allowed = ['jpg', 'jpeg', 'png', 'webp'];
+        if (!in_array($ext, $allowed)) {
+            jsonError('Format foto tidak valid. Gunakan JPG, JPEG, PNG, atau WEBP!');
+        }
+        $newName = 'BRG_' . $id_barang . '_' . time() . '.' . $ext;
+        $targetPath = $uploadsDir . $newName;
+        if (!move_uploaded_file($tmp, $targetPath)) {
+            jsonError('Gagal menyimpan file upload.');
+        }
+        fix_perm($targetPath, 0644);
+    } else {
+        $mime = $info['mime'];
+        $src = null;
+        switch ($mime) {
+            case 'image/jpeg': $src = imagecreatefromjpeg($tmp); break;
+            case 'image/png': $src = imagecreatefrompng($tmp); break;
+            case 'image/gif': if (function_exists('imagecreatefromgif')) $src = imagecreatefromgif($tmp); break;
+            case 'image/webp': if (function_exists('imagecreatefromwebp')) $src = imagecreatefromwebp($tmp); break;
+            default: jsonError('Format foto tidak valid.');
+        }
+        if (!$src) {
+            jsonError('Gagal memproses gambar.');
+        }
+
+        $width = imagesx($src);
+        $height = imagesy($src);
+        $maxDim = 1600;
+        $scale = 1;
+        if ($width > $maxDim || $height > $maxDim) {
+            $scale = min($maxDim / $width, $maxDim / $height);
+        }
+        $newW = max(1, (int)($width * $scale));
+        $newH = max(1, (int)($height * $scale));
+
+        $dst = imagecreatetruecolor($newW, $newH);
+        $white = imagecolorallocate($dst, 255, 255, 255);
+        imagefill($dst, 0, 0, $white);
+        imagecopyresampled($dst, $src, 0, 0, 0, 0, $newW, $newH, $width, $height);
+        imagedestroy($src);
+
+        $maxBytes = 500 * 1024;
+        $tempOut = tempnam(sys_get_temp_dir(), 'upimg_');
+        $quality = 90;
+        $saved = false;
+        while ($quality >= 10) {
+            imagejpeg($dst, $tempOut, $quality);
+            if (filesize($tempOut) <= $maxBytes) { $saved = true; break; }
+            $quality -= 10;
+        }
+        if (!$saved) {
+            imagejpeg($dst, $tempOut, 10);
+        }
+        imagedestroy($dst);
+
+        if (!rename($tempOut, $targetPath)) {
+            if (!copy($tempOut, $targetPath)) {
+                @unlink($tempOut);
+                jsonError('Gagal menyimpan hasil kompresi.');
+            }
+            @unlink($tempOut);
+        }
+        fix_perm($targetPath, 0644);
+    }
+
+    @copy($targetPath, $distDir . $newName);
+    fix_perm($distDir . $newName, 0644);
+
+    return $newName;
+}
+
+function master_exists($conn, $table, $id) {
+    $allowed = ['unit', 'ruang', 'jenis', 'kategori', 'merk'];
+    if (!in_array($table, $allowed, true)) return false;
+
+    $stmt = $conn->prepare("SELECT id FROM $table WHERE id = ?");
+    $stmt->bind_param("i", $id);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $exists = $res && $res->num_rows > 0;
+    $stmt->close();
+    return $exists;
 }
 
 // ============================================================
@@ -257,58 +409,209 @@ if ($action === 'get_barang') {
         jsonError('Format kode barang tidak valid.');
     }
     
-    $stmt = $conn->prepare("
-        SELECT b.*, m.nama_merk, j.nama_jenis, k.nama_kategori, u.nama_unit, r.nama_ruang 
-        FROM barang b 
-        LEFT JOIN merk m ON b.id_merk = m.id 
-        LEFT JOIN jenis j ON b.id_jenis = j.id 
-        LEFT JOIN kategori k ON b.id_kategori = k.id 
-        LEFT JOIN unit u ON b.id_unit = u.id 
-        LEFT JOIN ruang r ON b.id_ruang = r.id 
-        WHERE b.id = ?
-    ");
-    $stmt->bind_param("i", $id_barang);
-    $stmt->execute();
-    $res = $stmt->get_result();
+    $barang = fetch_barang_payload($conn, $id_barang);
     
-    if (!$res || $res->num_rows === 0) {
-        jsonError('Barang dengan kode "' . htmlspecialchars($code) . '" tidak ditemukan.');
+    if ($barang === null) {
+        jsonResponse([
+            'success' => false,
+            'not_found' => true,
+            'can_register' => true,
+            'message' => 'Label "' . htmlspecialchars($code) . '" belum terdaftar.'
+        ]);
     }
-    
-    $barang = $res->fetch_assoc();
-    $stmt->close();
     
     if ($barang['status_aktif'] !== 'aktif') {
         jsonResponse([
             'success' => false,
             'is_inactive' => true,
+            'can_register' => false,
             'message' => 'Barang sudah dikeluarkan dari inventaris.'
         ]);
     }
     
-    $foto_url = null;
-    if (!empty($barang['foto'])) {
-        $foto_url = $barang['foto'];
-    }
-    
     jsonResponse([
         'success' => true,
-        'data' => [
-            'id' => (int)$barang['id'],
-            'nama_barang' => $barang['nama_barang'],
-            'formatted_code' => str_pad($barang['id'], 5, "0", STR_PAD_LEFT),
-            'nama_merk' => $barang['nama_merk'] ?? '-',
-            'nama_jenis' => $barang['nama_jenis'] ?? '-',
-            'nama_kategori' => $barang['nama_kategori'] ?? '-',
-            'nama_unit' => $barang['nama_unit'] ?? '-',
-            'nama_ruang' => $barang['nama_ruang'] ?? '-',
-            'kondisi' => $barang['kondisi'],
-            'status_aktif' => $barang['status_aktif'],
-            'foto' => $foto_url,
-            'jumlah' => (int)$barang['jumlah'],
-            'tgl_pembelian' => $barang['tgl_pembelian'],
-        ]
+        'data' => $barang
     ]);
+}
+
+// ============================================================
+// ACTION: list_master (unit, jenis, kategori, merk untuk form register)
+// ============================================================
+if ($action === 'list_master') {
+    $sources = [
+        'unit' => ['table' => 'unit', 'column' => 'nama_unit'],
+        'jenis' => ['table' => 'jenis', 'column' => 'nama_jenis'],
+        'kategori' => ['table' => 'kategori', 'column' => 'nama_kategori'],
+        'merk' => ['table' => 'merk', 'column' => 'nama_merk'],
+    ];
+
+    $data = [];
+    foreach ($sources as $key => $source) {
+        $table = $source['table'];
+        $column = $source['column'];
+        $res = $conn->query("SELECT id, $column AS nama FROM $table ORDER BY $column ASC");
+        $items = [];
+        if ($res) {
+            while ($row = $res->fetch_assoc()) {
+                $items[] = [
+                    'id' => (int)$row['id'],
+                    'nama' => $row['nama'],
+                ];
+            }
+        }
+        $data[$key] = $items;
+    }
+
+    jsonResponse(['success' => true, 'data' => $data]);
+}
+
+// ============================================================
+// ACTION: register_barang (daftarkan label QR yang belum terpakai)
+// ============================================================
+if ($action === 'register_barang') {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        jsonError('Method not allowed', 405);
+    }
+
+    $label_code = trim($_POST['label_code'] ?? '');
+    if ($label_code === '' || !ctype_digit($label_code)) {
+        jsonError('Kode label tidak valid.');
+    }
+
+    $id_barang = intval($label_code);
+    if ($id_barang <= 0) {
+        jsonError('Kode label tidak valid.');
+    }
+
+    $stmt = $conn->prepare("SELECT id, status_aktif FROM barang WHERE id = ?");
+    $stmt->bind_param("i", $id_barang);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $existing = ($res && $res->num_rows > 0) ? $res->fetch_assoc() : null;
+    $stmt->close();
+
+    if ($existing) {
+        $pesan = $existing['status_aktif'] === 'aktif'
+            ? 'Label "' . htmlspecialchars($label_code) . '" sudah terdaftar.'
+            : 'Label "' . htmlspecialchars($label_code) . '" sudah terdaftar sebagai barang nonaktif.';
+        jsonError($pesan, 409);
+    }
+
+    $nama_barang = trim($_POST['nama_barang'] ?? '');
+    $jumlah = intval($_POST['jumlah'] ?? 0);
+    $id_unit = intval($_POST['id_unit'] ?? 0);
+    $id_ruang = intval($_POST['id_ruang'] ?? 0);
+    $id_jenis = intval($_POST['id_jenis'] ?? 0);
+    $id_kategori = intval($_POST['id_kategori'] ?? 0);
+    $id_merk = intval($_POST['id_merk'] ?? 0);
+    $kondisi = $_POST['kondisi'] ?? '';
+    $tgl_pembelian = trim($_POST['tgl_pembelian'] ?? '');
+
+    if ($nama_barang === '') {
+        jsonError('Nama barang wajib diisi.');
+    }
+    if ($jumlah < 1) {
+        jsonError('Jumlah barang minimal 1.');
+    }
+    if ($id_unit <= 0 || !master_exists($conn, 'unit', $id_unit)) {
+        jsonError('Unit tidak valid.');
+    }
+    if ($id_ruang <= 0 || !master_exists($conn, 'ruang', $id_ruang)) {
+        jsonError('Ruangan tidak valid.');
+    }
+    if ($id_jenis <= 0 || !master_exists($conn, 'jenis', $id_jenis)) {
+        jsonError('Jenis tidak valid.');
+    }
+    if ($id_kategori <= 0 || !master_exists($conn, 'kategori', $id_kategori)) {
+        jsonError('Kategori tidak valid.');
+    }
+    if ($id_merk <= 0 || !master_exists($conn, 'merk', $id_merk)) {
+        jsonError('Merk tidak valid.');
+    }
+    if (!in_array($kondisi, ['Baik', 'Rusak', 'Hilang'], true)) {
+        jsonError('Kondisi barang tidak valid.');
+    }
+
+    $stmt = $conn->prepare("SELECT id FROM ruang WHERE id = ? AND id_unit = ?");
+    $stmt->bind_param("ii", $id_ruang, $id_unit);
+    $stmt->execute();
+    $ruang_res = $stmt->get_result();
+    $ruang_valid = $ruang_res && $ruang_res->num_rows > 0;
+    $stmt->close();
+    if (!$ruang_valid) {
+        jsonError('Ruangan tidak sesuai dengan unit yang dipilih.');
+    }
+
+    $tgl = DateTime::createFromFormat('Y-m-d', $tgl_pembelian);
+    if (!$tgl || $tgl->format('Y-m-d') !== $tgl_pembelian) {
+        jsonError('Tanggal pembelian tidak valid.');
+    }
+
+    $foto_name = null;
+    $has_foto = isset($_FILES['foto']) && ($_FILES['foto']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE;
+    if ($has_foto) {
+        if ($_FILES['foto']['error'] !== UPLOAD_ERR_OK) {
+            jsonError('Gagal mengunggah foto barang (kode ' . $_FILES['foto']['error'] . ').');
+        }
+        $foto_name = save_barang_photo($_FILES['foto'], $id_barang);
+    }
+
+    if ($kondisi === 'Rusak' && $foto_name === null) {
+        jsonError('Foto barang wajib dilampirkan jika kondisi Rusak!');
+    }
+
+    $conn->begin_transaction();
+    try {
+        $stmt = $conn->prepare("
+            INSERT INTO barang
+                (id, nama_barang, id_merk, jumlah, id_jenis, id_kategori, id_unit, id_ruang, kondisi, status_aktif, tgl_pembelian, foto)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'aktif', ?, ?)
+        ");
+        if (!$stmt) {
+            throw new Exception($conn->error);
+        }
+        $stmt->bind_param(
+            "isiiiiiisss",
+            $id_barang,
+            $nama_barang,
+            $id_merk,
+            $jumlah,
+            $id_jenis,
+            $id_kategori,
+            $id_unit,
+            $id_ruang,
+            $kondisi,
+            $tgl_pembelian,
+            $foto_name
+        );
+        if (!$stmt->execute()) {
+            $errno = $conn->errno;
+            $error = $conn->error;
+            $stmt->close();
+            throw new Exception($errno === 1062 ? 'Label sudah terdaftar.' : $error);
+        }
+        $stmt->close();
+
+        $payload = fetch_barang_payload($conn, $id_barang);
+        if ($payload === null) {
+            throw new Exception('Data barang gagal dibaca ulang.');
+        }
+        $conn->commit();
+
+        jsonResponse([
+            'success' => true,
+            'message' => 'Registrasi label "' . $label_code . '" berhasil. Barang "' . $nama_barang . '" sudah terdaftar.',
+            'data' => $payload,
+        ]);
+    } catch (Exception $e) {
+        $conn->rollback();
+        if ($foto_name !== null) {
+            @unlink('../uploads/barang/' . $foto_name);
+            @unlink('../dist/img/barang/' . $foto_name);
+        }
+        jsonError('Gagal menyimpan barang: ' . $e->getMessage(), 500);
+    }
 }
 
 // ============================================================
