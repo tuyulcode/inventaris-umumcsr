@@ -18,16 +18,21 @@ class ApiService {
   // ============================================================
   // LOGIN
   // ============================================================
-  static Future<Map<String, dynamic>> login(String username, String password) async {
+  static Future<Map<String, dynamic>> login(
+    String username,
+    String password,
+  ) async {
     try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.apiUrl}?action=login'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({'username': username, 'password': password}),
-      ).timeout(const Duration(seconds: 15));
+      final response = await http
+          .post(
+            Uri.parse('${ApiConfig.apiUrl}?action=login'),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode({'username': username, 'password': password}),
+          )
+          .timeout(const Duration(seconds: 15));
 
       final data = json.decode(response.body);
-      
+
       if (data['success'] == true) {
         final user = User.fromJson(data['data']);
         final token = data['data']['token'];
@@ -37,7 +42,10 @@ class ApiService {
         return {'success': false, 'message': data['message'] ?? 'Login gagal'};
       }
     } on SocketException {
-      return {'success': false, 'message': 'Tidak dapat terhubung ke server. Periksa koneksi internet.'};
+      return {
+        'success': false,
+        'message': 'Tidak dapat terhubung ke server. Periksa koneksi internet.',
+      };
     } catch (e) {
       return {'success': false, 'message': 'Terjadi kesalahan: $e'};
     }
@@ -48,17 +56,23 @@ class ApiService {
   // ============================================================
   static Future<Map<String, dynamic>> getDashboard() async {
     try {
-      final response = await http.get(
-        Uri.parse('${ApiConfig.apiUrl}?action=dashboard'),
-        headers: _authHeaders,
-      ).timeout(const Duration(seconds: 15));
+      final response = await http
+          .get(
+            Uri.parse('${ApiConfig.apiUrl}?action=dashboard'),
+            headers: _authHeaders,
+          )
+          .timeout(const Duration(seconds: 15));
 
       final data = json.decode(response.body);
-      
+
       if (response.statusCode == 401) {
-        return {'success': false, 'unauthorized': true, 'message': data['message']};
+        return {
+          'success': false,
+          'unauthorized': true,
+          'message': data['message'],
+        };
       }
-      
+
       return data;
     } on SocketException {
       return {'success': false, 'message': 'Tidak dapat terhubung ke server.'};
@@ -72,17 +86,102 @@ class ApiService {
   // ============================================================
   static Future<Map<String, dynamic>> getBarang(String code) async {
     try {
-      final response = await http.get(
-        Uri.parse('${ApiConfig.apiUrl}?action=get_barang&code=$code'),
-        headers: _authHeaders,
-      ).timeout(const Duration(seconds: 15));
+      final response = await http
+          .get(
+            Uri.parse('${ApiConfig.apiUrl}?action=get_barang&code=$code'),
+            headers: _authHeaders,
+          )
+          .timeout(const Duration(seconds: 15));
 
       final data = json.decode(response.body);
-      
+
       if (data['success'] == true) {
         return {'success': true, 'data': Barang.fromJson(data['data'])};
       }
-      return {'success': false, 'message': data['message'] ?? 'Barang tidak ditemukan'};
+      return {
+        'success': false,
+        'message': data['message'] ?? 'Barang tidak ditemukan',
+        'not_found': data['not_found'] == true,
+        'can_register': data['can_register'] == true,
+        'is_inactive': data['is_inactive'] == true,
+      };
+    } on SocketException {
+      return {'success': false, 'message': 'Tidak dapat terhubung ke server.'};
+    } catch (e) {
+      return {'success': false, 'message': 'Terjadi kesalahan: $e'};
+    }
+  }
+
+  // ============================================================
+  // MASTER DATA (untuk form registrasi label)
+  // ============================================================
+  static Future<Map<String, dynamic>> getMasterData() async {
+    try {
+      final response = await http
+          .get(
+            Uri.parse('${ApiConfig.apiUrl}?action=list_master'),
+            headers: _authHeaders,
+          )
+          .timeout(const Duration(seconds: 15));
+
+      final data = json.decode(response.body);
+      if (data['success'] == true) {
+        return {'success': true, 'data': data['data']};
+      }
+      return {
+        'success': false,
+        'message': data['message'] ?? 'Gagal memuat data master',
+      };
+    } on SocketException {
+      return {'success': false, 'message': 'Tidak dapat terhubung ke server.'};
+    } catch (e) {
+      return {'success': false, 'message': 'Terjadi kesalahan: $e'};
+    }
+  }
+
+  // ============================================================
+  // REGISTER LABEL QR BARU
+  // ============================================================
+  static Future<Map<String, dynamic>> registerBarang({
+    required String labelCode,
+    required String namaBarang,
+    required int idUnit,
+    required int idRuang,
+    required int idJenis,
+    required int idKategori,
+    required int idMerk,
+    required int jumlah,
+    required String kondisi,
+    required String tglPembelian,
+    File? foto,
+  }) async {
+    try {
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('${ApiConfig.apiUrl}?action=register_barang'),
+      );
+
+      request.headers.addAll(_authHeaders);
+      request.fields['label_code'] = labelCode;
+      request.fields['nama_barang'] = namaBarang;
+      request.fields['id_unit'] = idUnit.toString();
+      request.fields['id_ruang'] = idRuang.toString();
+      request.fields['id_jenis'] = idJenis.toString();
+      request.fields['id_kategori'] = idKategori.toString();
+      request.fields['id_merk'] = idMerk.toString();
+      request.fields['jumlah'] = jumlah.toString();
+      request.fields['kondisi'] = kondisi;
+      request.fields['tgl_pembelian'] = tglPembelian;
+
+      if (foto != null) {
+        request.files.add(await http.MultipartFile.fromPath('foto', foto.path));
+      }
+
+      final streamedResponse = await request.send().timeout(
+        const Duration(seconds: 45),
+      );
+      final response = await http.Response.fromStream(streamedResponse);
+      return json.decode(response.body);
     } on SocketException {
       return {'success': false, 'message': 'Tidak dapat terhubung ke server.'};
     } catch (e) {
@@ -93,12 +192,18 @@ class ApiService {
   // ============================================================
   // LIST BARANG ALL (for Update Gambar dropdown/search)
   // ============================================================
-  static Future<Map<String, dynamic>> getListBarangAll({String search = ''}) async {
+  static Future<Map<String, dynamic>> getListBarangAll({
+    String search = '',
+  }) async {
     try {
-      final response = await http.get(
-        Uri.parse('${ApiConfig.apiUrl}?action=list_barang_all&search=${Uri.encodeComponent(search)}'),
-        headers: _authHeaders,
-      ).timeout(const Duration(seconds: 15));
+      final response = await http
+          .get(
+            Uri.parse(
+              '${ApiConfig.apiUrl}?action=list_barang_all&search=${Uri.encodeComponent(search)}',
+            ),
+            headers: _authHeaders,
+          )
+          .timeout(const Duration(seconds: 15));
 
       final data = json.decode(response.body);
       return data;
@@ -122,22 +227,21 @@ class ApiService {
         'POST',
         Uri.parse('${ApiConfig.apiUrl}?action=update_gambar'),
       );
-      
+
       request.headers.addAll(_authHeaders);
       request.fields['id_barang'] = idBarang.toString();
       request.fields['sub_action'] = subAction;
-      
+
       if (subAction == 'upload' && foto != null) {
-        request.files.add(await http.MultipartFile.fromPath(
-          'foto',
-          foto.path,
-        ));
+        request.files.add(await http.MultipartFile.fromPath('foto', foto.path));
       }
-      
-      final streamedResponse = await request.send().timeout(const Duration(seconds: 30));
+
+      final streamedResponse = await request.send().timeout(
+        const Duration(seconds: 30),
+      );
       final response = await http.Response.fromStream(streamedResponse);
       final data = json.decode(response.body);
-      
+
       return data;
     } on SocketException {
       return {'success': false, 'message': 'Tidak dapat terhubung ke server.'};
@@ -151,10 +255,14 @@ class ApiService {
   // ============================================================
   static Future<Map<String, dynamic>> checkStatus(int barangId) async {
     try {
-      final response = await http.get(
-        Uri.parse('${ApiConfig.apiUrl}?action=check_status&barang_id=$barangId'),
-        headers: _authHeaders,
-      ).timeout(const Duration(seconds: 10));
+      final response = await http
+          .get(
+            Uri.parse(
+              '${ApiConfig.apiUrl}?action=check_status&barang_id=$barangId',
+            ),
+            headers: _authHeaders,
+          )
+          .timeout(const Duration(seconds: 10));
 
       return json.decode(response.body);
     } catch (_) {
@@ -176,23 +284,24 @@ class ApiService {
         'POST',
         Uri.parse('${ApiConfig.apiUrl}?action=submit_pengecekan'),
       );
-      
+
       request.headers.addAll(_authHeaders);
       request.fields['id_barang'] = idBarang.toString();
       request.fields['kondisi_temuan'] = kondisiTemuan;
       request.fields['catatan'] = catatan;
-      
+
       if (fotoBukti != null) {
-        request.files.add(await http.MultipartFile.fromPath(
-          'foto_bukti',
-          fotoBukti.path,
-        ));
+        request.files.add(
+          await http.MultipartFile.fromPath('foto_bukti', fotoBukti.path),
+        );
       }
-      
-      final streamedResponse = await request.send().timeout(const Duration(seconds: 30));
+
+      final streamedResponse = await request.send().timeout(
+        const Duration(seconds: 30),
+      );
       final response = await http.Response.fromStream(streamedResponse);
       final data = json.decode(response.body);
-      
+
       return data;
     } on SocketException {
       return {'success': false, 'message': 'Tidak dapat terhubung ke server.'};
@@ -206,17 +315,24 @@ class ApiService {
   // ============================================================
   static Future<Map<String, dynamic>> getUnits() async {
     try {
-      final response = await http.get(
-        Uri.parse('${ApiConfig.apiUrl}?action=list_unit'),
-        headers: _authHeaders,
-      ).timeout(const Duration(seconds: 15));
+      final response = await http
+          .get(
+            Uri.parse('${ApiConfig.apiUrl}?action=list_unit'),
+            headers: _authHeaders,
+          )
+          .timeout(const Duration(seconds: 15));
 
       final data = json.decode(response.body);
       if (data['success'] == true) {
-        final units = (data['data'] as List).map((e) => Unit.fromJson(e)).toList();
+        final units = (data['data'] as List)
+            .map((e) => Unit.fromJson(e))
+            .toList();
         return {'success': true, 'data': units};
       }
-      return {'success': false, 'message': data['message'] ?? 'Gagal memuat unit'};
+      return {
+        'success': false,
+        'message': data['message'] ?? 'Gagal memuat unit',
+      };
     } on SocketException {
       return {'success': false, 'message': 'Tidak dapat terhubung ke server.'};
     } catch (e) {
@@ -226,17 +342,24 @@ class ApiService {
 
   static Future<Map<String, dynamic>> getRuang(int unitId) async {
     try {
-      final response = await http.get(
-        Uri.parse('${ApiConfig.apiUrl}?action=list_ruang&unit_id=$unitId'),
-        headers: _authHeaders,
-      ).timeout(const Duration(seconds: 15));
+      final response = await http
+          .get(
+            Uri.parse('${ApiConfig.apiUrl}?action=list_ruang&unit_id=$unitId'),
+            headers: _authHeaders,
+          )
+          .timeout(const Duration(seconds: 15));
 
       final data = json.decode(response.body);
       if (data['success'] == true) {
-        final rooms = (data['data'] as List).map((e) => Ruang.fromJson(e)).toList();
+        final rooms = (data['data'] as List)
+            .map((e) => Ruang.fromJson(e))
+            .toList();
         return {'success': true, 'data': rooms};
       }
-      return {'success': false, 'message': data['message'] ?? 'Gagal memuat ruangan'};
+      return {
+        'success': false,
+        'message': data['message'] ?? 'Gagal memuat ruangan',
+      };
     } on SocketException {
       return {'success': false, 'message': 'Tidak dapat terhubung ke server.'};
     } catch (e) {
@@ -244,16 +367,25 @@ class ApiService {
     }
   }
 
-  static Future<Map<String, dynamic>> getBarangRuang(int unitId, int ruangId) async {
+  static Future<Map<String, dynamic>> getBarangRuang(
+    int unitId,
+    int ruangId,
+  ) async {
     try {
-      final response = await http.get(
-        Uri.parse('${ApiConfig.apiUrl}?action=list_barang_ruang&unit_id=$unitId&ruang_id=$ruangId'),
-        headers: _authHeaders,
-      ).timeout(const Duration(seconds: 15));
+      final response = await http
+          .get(
+            Uri.parse(
+              '${ApiConfig.apiUrl}?action=list_barang_ruang&unit_id=$unitId&ruang_id=$ruangId',
+            ),
+            headers: _authHeaders,
+          )
+          .timeout(const Duration(seconds: 15));
 
       final data = json.decode(response.body);
       if (data['success'] == true) {
-        final items = (data['data'] as List).map((e) => BarangCek.fromJson(e)).toList();
+        final items = (data['data'] as List)
+            .map((e) => BarangCek.fromJson(e))
+            .toList();
         return {
           'success': true,
           'data': items,
@@ -261,7 +393,10 @@ class ApiService {
           'has_periode': data['has_periode'],
         };
       }
-      return {'success': false, 'message': data['message'] ?? 'Gagal memuat daftar barang'};
+      return {
+        'success': false,
+        'message': data['message'] ?? 'Gagal memuat daftar barang',
+      };
     } on SocketException {
       return {'success': false, 'message': 'Tidak dapat terhubung ke server.'};
     } catch (e) {
@@ -271,11 +406,13 @@ class ApiService {
 
   static Future<Map<String, dynamic>> checkBaik(int idBarang) async {
     try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.apiUrl}?action=check_baik'),
-        headers: _authHeaders,
-        body: {'id_barang': idBarang.toString()},
-      ).timeout(const Duration(seconds: 15));
+      final response = await http
+          .post(
+            Uri.parse('${ApiConfig.apiUrl}?action=check_baik'),
+            headers: _authHeaders,
+            body: {'id_barang': idBarang.toString()},
+          )
+          .timeout(const Duration(seconds: 15));
 
       return json.decode(response.body);
     } on SocketException {
@@ -287,11 +424,13 @@ class ApiService {
 
   static Future<Map<String, dynamic>> batalCheck(int idBarang) async {
     try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.apiUrl}?action=batal_check'),
-        headers: _authHeaders,
-        body: {'id_barang': idBarang.toString()},
-      ).timeout(const Duration(seconds: 15));
+      final response = await http
+          .post(
+            Uri.parse('${ApiConfig.apiUrl}?action=batal_check'),
+            headers: _authHeaders,
+            body: {'id_barang': idBarang.toString()},
+          )
+          .timeout(const Duration(seconds: 15));
 
       return json.decode(response.body);
     } on SocketException {
@@ -313,15 +452,16 @@ class ApiService {
     try {
       final params =
           'action=riwayat&page=$page&limit=$limit&search=${Uri.encodeComponent(search)}&kondisi=${Uri.encodeComponent(kondisi)}';
-      final response = await http.get(
-        Uri.parse('${ApiConfig.apiUrl}?$params'),
-        headers: _authHeaders,
-      ).timeout(const Duration(seconds: 15));
+      final response = await http
+          .get(Uri.parse('${ApiConfig.apiUrl}?$params'), headers: _authHeaders)
+          .timeout(const Duration(seconds: 15));
 
       final data = json.decode(response.body);
-      
+
       if (data['success'] == true) {
-        final items = (data['data'] as List).map((e) => Pengecekan.fromJson(e)).toList();
+        final items = (data['data'] as List)
+            .map((e) => Pengecekan.fromJson(e))
+            .toList();
         return {
           'success': true,
           'data': items,
@@ -329,7 +469,10 @@ class ApiService {
           'summary': data['summary'],
         };
       }
-      return {'success': false, 'message': data['message'] ?? 'Gagal memuat riwayat'};
+      return {
+        'success': false,
+        'message': data['message'] ?? 'Gagal memuat riwayat',
+      };
     } on SocketException {
       return {'success': false, 'message': 'Tidak dapat terhubung ke server.'};
     } catch (e) {
@@ -347,18 +490,22 @@ class ApiService {
   }) async {
     try {
       final params = 'action=riwayat_kalender&bulan=$bulan&tahun=$tahun';
-      final response = await http.get(
-        Uri.parse('${ApiConfig.apiUrl}?$params'),
-        headers: _authHeaders,
-      ).timeout(const Duration(seconds: 15));
+      final response = await http
+          .get(Uri.parse('${ApiConfig.apiUrl}?$params'), headers: _authHeaders)
+          .timeout(const Duration(seconds: 15));
 
       final data = json.decode(response.body);
 
       if (data['success'] == true) {
-        final items = (data['data'] as List).map((e) => Pengecekan.fromJson(e)).toList();
+        final items = (data['data'] as List)
+            .map((e) => Pengecekan.fromJson(e))
+            .toList();
         return {'success': true, 'data': items};
       }
-      return {'success': false, 'message': data['message'] ?? 'Gagal memuat kalender riwayat'};
+      return {
+        'success': false,
+        'message': data['message'] ?? 'Gagal memuat kalender riwayat',
+      };
     } on SocketException {
       return {'success': false, 'message': 'Tidak dapat terhubung ke server.'};
     } catch (e) {
@@ -371,10 +518,12 @@ class ApiService {
   // ============================================================
   static Future<Map<String, dynamic>> getProfil() async {
     try {
-      final response = await http.get(
-        Uri.parse('${ApiConfig.apiUrl}?action=profil'),
-        headers: _authHeaders,
-      ).timeout(const Duration(seconds: 10));
+      final response = await http
+          .get(
+            Uri.parse('${ApiConfig.apiUrl}?action=profil'),
+            headers: _authHeaders,
+          )
+          .timeout(const Duration(seconds: 10));
 
       return json.decode(response.body);
     } catch (e) {
